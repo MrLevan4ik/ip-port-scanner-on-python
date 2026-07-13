@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 >nul
 title Proxy Scanner - CLI
 
 cd /d "%~dp0\.."
@@ -13,6 +12,6 @@ python main.py %*
 
 echo.
 echo ============================================
-echo   Нажмите любую клавишу для выхода...
+echo   Press any key to exit...
 echo ============================================
 pause >nul

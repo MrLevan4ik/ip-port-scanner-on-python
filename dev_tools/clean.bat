@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 >nul
 title Proxy Scanner - Clean Build Files
 
 cd /d "%~dp0\.."
@@ -9,21 +8,21 @@ echo   Proxy Scanner - Clean Build Files
 echo ============================================
 echo.
 
-echo Удаление build/...
+echo Deleting build/...
 if exist build rmdir /s /q build
 
-echo Удаление dist/...
+echo Deleting dist/...
 if exist dist rmdir /s /q dist
 
-echo Удаление *.spec...
+echo Deleting *.spec...
 del /q *.spec 2>nul
 
-echo Удаление __pycache__/...
+echo Deleting __pycache__/...
 for /d /r %%d in (__pycache__) do if exist "%%d" rmdir /s /q "%%d"
 
 echo.
 echo ============================================
-echo   Готово! Временные файлы удалены.
+echo   Done! Temp files removed.
 echo ============================================
 echo.
 pause
