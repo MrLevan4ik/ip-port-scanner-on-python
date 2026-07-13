@@ -46,8 +46,8 @@ QGroupBox {
     font-weight: 600;
     border: 1px solid #313244;
     border-radius: 8px;
-    margin-top: 10px;
-    padding: 12px 8px 8px 8px;
+    margin-top: 8px;
+    padding: 8px 8px 6px 8px;
     color: #cdd6f4;
     background-color: rgba(49, 50, 68, 80);
 }
@@ -322,35 +322,45 @@ class ProxyScannerGUI(QMainWindow):
         super().__init__()
         self.setWindowTitle("Proxy Scanner")
         self.setMinimumSize(960, 620)
-        self.resize(1050, 680)
+        self.resize(1050, 750)
         self.worker = None
 
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
-        main_layout.setSpacing(6)
-        main_layout.setContentsMargins(10, 8, 10, 8)
+        main_layout.setSpacing(4)
+        main_layout.setContentsMargins(10, 6, 10, 6)
 
-        # --- Заголовок (компактный) ---
+        # --- Заголовок (компактный, в одну строку с ссылками) ---
         header = QHBoxLayout()
-        header.setSpacing(10)
-        dot = QLabel("\u25cf")
-        dot.setStyleSheet("color: #a6e3a1; font-size: 10px;")
-        header.addWidget(dot)
+        header.setSpacing(0)
+        header.setContentsMargins(0, 0, 0, 0)
         title = QLabel("PROXY SCANNER")
-        title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        title.setStyleSheet("color: #cdd6f4; letter-spacing: 2px;")
+        title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        title.setStyleSheet("color: #cdd6f4; letter-spacing: 1px;")
         header.addWidget(title)
         header.addStretch()
-        ver = QLabel("v2.0")
-        ver.setStyleSheet("color: #585b70; font-size: 10px;")
-        header.addWidget(ver)
+        link_repo = QLabel(
+            '<a href="https://github.com/MrLevan4ik/ip-port-scanner-on-python" '
+            'style="color:#89b4fa; font-size:10px; text-decoration:none;">GitHub</a> '
+            '<a href="https://github.com/FoxVukOff/ip-port-scanner-on-python" '
+            'style="color:#f9e2af; font-size:10px; text-decoration:none;">Nightly</a>')
+        link_repo.setOpenExternalLinks(True)
+        header.addWidget(link_repo)
+        header.addSpacing(12)
+        link_author = QLabel('<a href="https://github.com/MrLevan4ik" '
+                             'style="color:#89b4fa; font-size:10px; text-decoration:none;">MrLevan4ik</a> '
+                             '<a href="https://github.com/FoxVukOff" '
+                             'style="color:#89b4fa; font-size:10px; text-decoration:none;">FoxVukOff</a>')
+        link_author.setOpenExternalLinks(True)
+        header.addWidget(link_author)
         main_layout.addLayout(header)
 
         # --- Секция настроек ---
         settings = QGroupBox("Настройки")
         s_layout = QVBoxLayout()
-        s_layout.setSpacing(6)
+        s_layout.setSpacing(4)
+        s_layout.setContentsMargins(8, 4, 8, 4)
         settings.setLayout(s_layout)
 
         # Папки
@@ -428,18 +438,18 @@ class ProxyScannerGUI(QMainWindow):
         btn_row.setSpacing(8)
         self.btn_start = QPushButton("\u25b6  СКАНИРОВАТЬ")
         self.btn_start.setObjectName("btn_start")
-        self.btn_start.setFixedHeight(32)
+        self.btn_start.setFixedHeight(28)
         self.btn_start.clicked.connect(self._start_scan)
 
         self.btn_stop = QPushButton("\u25a0  СТОП")
         self.btn_stop.setObjectName("btn_stop")
-        self.btn_stop.setFixedHeight(32)
+        self.btn_stop.setFixedHeight(28)
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._stop_scan)
 
         self.btn_open = QPushButton("\u2197  ОТКРЫТЬ РЕЗУЛЬТАТЫ")
         self.btn_open.setObjectName("btn_open")
-        self.btn_open.setFixedHeight(32)
+        self.btn_open.setFixedHeight(28)
         self.btn_open.setEnabled(False)
         self.btn_open.clicked.connect(self._open_results)
 
@@ -453,7 +463,7 @@ class ProxyScannerGUI(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("%p%  |  %v / %m")
-        self.progress_bar.setFixedHeight(24)
+        self.progress_bar.setFixedHeight(20)
         main_layout.addWidget(self.progress_bar)
 
         # --- Сплиттер: лог + таблица ---
