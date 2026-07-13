@@ -600,7 +600,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Примеры:
-  python main.py                               # базовый запуск
+  python main.py                               # CLI: базовый запуск
+  python main.py --gui                         # GUI: графический интерфейс
   python main.py -d my_proxies/ -t 3 -w 50    # свои настройки
   python main.py --fetch                       # скачать прокси-листы
   python main.py --watch 300                   # проверка каждые 5 минут
@@ -648,6 +649,11 @@ def build_parser() -> argparse.ArgumentParser:
     g3 = parser.add_argument_group("Логирование")
     g3.add_argument("--no-log-errors", action="store_true",
                     help="Отключить логирование ошибок в файл")
+
+    # Режим интерфейса
+    g4 = parser.add_argument_group("Режим")
+    g4.add_argument("--gui", action="store_true",
+                    help="Запустить графический интерфейс (PyQt6)")
 
     return parser
 
@@ -737,6 +743,17 @@ def run_scan(args):
 def main():
     parser = build_parser()
     args = parser.parse_args()
+
+    # GUI режим
+    if args.gui:
+        try:
+            from gui import run_gui
+            run_gui()
+        except ImportError:
+            print("PyQt6 не установлен. Установите:")
+            print("  pip install PyQt6")
+            sys.exit(1)
+        return
 
     if not args.no_log_errors:
         _setup_error_log()
