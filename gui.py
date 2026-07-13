@@ -1,63 +1,97 @@
 import os
 import sys
-import time
+import re
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTabWidget, QLabel, QLineEdit, QSpinBox, QCheckBox, QPushButton,
-    QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
-    QProgressBar, QGroupBox, QSplitter, QMessageBox, QFrame,
-    QAbstractItemView, QStatusBar,
+    QLabel, QLineEdit, QCheckBox, QPushButton, QTextEdit, QFrame,
+    QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
+    QProgressBar, QGroupBox, QSplitter, QMessageBox, QAbstractItemView,
+    QSizePolicy, QGraphicsDropShadowEffect,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QPalette, QIcon, QTextCursor
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QFont, QColor, QIntValidator
 
 
 # ---------------------------------------------------------------------------
-# Styles
+# Валидированный ввод числа (заменяет QSpinBox со стрелками)
+# ---------------------------------------------------------------------------
+class NumInput(QLineEdit):
+    def __init__(self, default=0, min_val=0, max_val=999999,
+                 placeholder="", parent=None):
+        super().__init__(parent)
+        self._min = min_val
+        self._max = max_val
+        self.setValidator(QIntValidator(min_val, max_val))
+        self.setText(str(default))
+        self.setPlaceholderText(placeholder)
+        self.setFixedWidth(85)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    def value(self):
+        try:
+            return int(self.text())
+        except ValueError:
+            return self._min
+
+
+# ---------------------------------------------------------------------------
+# Стили Catppuccin Mocha
 # ---------------------------------------------------------------------------
 STYLE = """
 QMainWindow {
     background-color: #1e1e2e;
 }
 QGroupBox {
-    font-weight: bold;
-    border: 1px solid #45475a;
-    border-radius: 6px;
-    margin-top: 12px;
-    padding-top: 14px;
+    font-weight: 600;
+    border: 1px solid #313244;
+    border-radius: 8px;
+    margin-top: 10px;
+    padding: 12px 8px 8px 8px;
     color: #cdd6f4;
+    background-color: rgba(49, 50, 68, 80);
 }
 QGroupBox::title {
     subcontrol-origin: margin;
-    left: 12px;
-    padding: 0 6px;
+    left: 14px;
+    padding: 0 8px;
     color: #89b4fa;
+    font-size: 11px;
 }
 QLabel {
-    color: #cdd6f4;
+    color: #bac2de;
+    font-size: 11px;
 }
-QLineEdit, QSpinBox {
-    background-color: #313244;
+QLineEdit {
+    background-color: #181825;
     color: #cdd6f4;
-    border: 1px solid #45475a;
-    border-radius: 4px;
+    border: 1px solid #313244;
+    border-radius: 5px;
     padding: 5px 8px;
-    min-height: 22px;
+    font-size: 12px;
+    selection-background-color: #45475a;
 }
-QLineEdit:focus, QSpinBox:focus {
+QLineEdit:focus {
     border: 1px solid #89b4fa;
 }
+QLineEdit:read-only {
+    background-color: #11111b;
+    color: #6c7086;
+}
 QCheckBox {
-    color: #cdd6f4;
+    color: #a6adc8;
     spacing: 6px;
+    font-size: 11px;
 }
 QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
-    border-radius: 3px;
-    border: 1px solid #45475a;
-    background-color: #313244;
+    width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    border: 1.5px solid #45475a;
+    background-color: #181825;
+}
+QCheckBox::indicator:hover {
+    border-color: #585b70;
 }
 QCheckBox::indicator:checked {
     background-color: #89b4fa;
@@ -65,10 +99,11 @@ QCheckBox::indicator:checked {
 }
 QPushButton {
     border: none;
-    border-radius: 5px;
-    padding: 7px 18px;
-    font-weight: bold;
-    min-height: 24px;
+    border-radius: 6px;
+    padding: 6px 16px;
+    font-weight: 600;
+    font-size: 12px;
+    min-height: 22px;
 }
 QPushButton#btn_start {
     background-color: #a6e3a1;
@@ -78,8 +113,8 @@ QPushButton#btn_start:hover {
     background-color: #94e2d5;
 }
 QPushButton#btn_start:disabled {
-    background-color: #45475a;
-    color: #6c7086;
+    background-color: #313244;
+    color: #585b70;
 }
 QPushButton#btn_stop {
     background-color: #f38ba8;
@@ -89,15 +124,18 @@ QPushButton#btn_stop:hover {
     background-color: #eba0ac;
 }
 QPushButton#btn_stop:disabled {
-    background-color: #45475a;
-    color: #6c7086;
+    background-color: #313244;
+    color: #585b70;
 }
 QPushButton#btn_browse {
-    background-color: #45475a;
-    color: #cdd6f4;
+    background-color: #313244;
+    color: #a6adc8;
+    padding: 5px 10px;
+    font-size: 11px;
 }
 QPushButton#btn_browse:hover {
-    background-color: #585b70;
+    background-color: #45475a;
+    color: #cdd6f4;
 }
 QPushButton#btn_open {
     background-color: #89b4fa;
@@ -107,79 +145,69 @@ QPushButton#btn_open:hover {
     background-color: #74c7ec;
 }
 QPushButton#btn_open:disabled {
-    background-color: #45475a;
-    color: #6c7086;
+    background-color: #313244;
+    color: #585b70;
 }
 QProgressBar {
-    border: 1px solid #45475a;
-    border-radius: 4px;
+    border: 1px solid #313244;
+    border-radius: 6px;
     text-align: center;
     color: #1e1e2e;
-    background-color: #313244;
-    min-height: 20px;
+    background-color: #181825;
+    font-size: 11px;
+    font-weight: 600;
+    min-height: 22px;
 }
 QProgressBar::chunk {
-    background-color: #a6e3a1;
-    border-radius: 3px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #a6e3a1, stop:1 #94e2d5);
+    border-radius: 5px;
 }
 QTextEdit {
-    background-color: #181825;
+    background-color: #11111b;
     color: #a6e3a1;
-    border: 1px solid #45475a;
-    border-radius: 4px;
-    font-family: Consolas, monospace;
+    border: 1px solid #313244;
+    border-radius: 6px;
+    font-family: 'Cascadia Code', 'Consolas', 'SF Mono', monospace;
     font-size: 11px;
+    padding: 4px;
 }
 QTableWidget {
-    background-color: #181825;
+    background-color: #11111b;
     color: #cdd6f4;
-    gridline-color: #313244;
-    border: 1px solid #45475a;
-    border-radius: 4px;
-    selection-background-color: #45475a;
+    gridline-color: #1e1e2e;
+    border: 1px solid #313244;
+    border-radius: 6px;
+    selection-background-color: #313244;
+    font-size: 11px;
 }
 QTableWidget::item {
-    padding: 4px 8px;
+    padding: 3px 6px;
 }
 QHeaderView::section {
-    background-color: #313244;
+    background-color: #181825;
     color: #89b4fa;
     border: none;
-    border-bottom: 2px solid #45475a;
+    border-bottom: 2px solid #313244;
     padding: 6px 8px;
-    font-weight: bold;
+    font-weight: 600;
+    font-size: 11px;
 }
 QStatusBar {
-    background-color: #181825;
-    color: #6c7086;
-    border-top: 1px solid #313244;
+    background-color: #11111b;
+    color: #585b70;
+    border-top: 1px solid #1e1e2e;
+    font-size: 11px;
 }
 QSplitter::handle {
     background-color: #313244;
-}
-QTabWidget::pane {
-    border: 1px solid #45475a;
-    border-radius: 4px;
-    background-color: #1e1e2e;
-}
-QTabBar::tab {
-    background-color: #313244;
-    color: #6c7086;
-    padding: 8px 16px;
-    border: none;
-    border-top-left-radius: 4px;
-    border-top-right-radius: 4px;
-    margin-right: 2px;
-}
-QTabBar::tab:selected {
-    background-color: #45475a;
-    color: #cdd6f4;
+    width: 2px;
 }
 """
 
 
 # ---------------------------------------------------------------------------
-# Scan worker thread
+# Поток сканирования
 # ---------------------------------------------------------------------------
 class ScanWorker(QThread):
     progress = pyqtSignal(int, int, int)
@@ -202,7 +230,7 @@ class ScanWorker(QThread):
                 check_proxy_with_retry, _setup_logs, is_valid_ip,
             )
         except ImportError as e:
-            self.error.emit(f"Import error: {e}")
+            self.error.emit(f"Ошибка импорта: {e}")
             return
 
         cfg = self.config
@@ -211,16 +239,16 @@ class ScanWorker(QThread):
 
         base_path = cfg["input_dir"]
         if not os.path.exists(base_path):
-            self.error.emit(f"Folder not found: {base_path}")
+            self.error.emit(f"Папка не найдена: {base_path}")
             return
 
-        self.log.emit(f"[INFO] Searching .txt files in {base_path}")
+        self.log.emit(f"[INFO] Поиск .txt файлов в {base_path}")
         txt_files = find_all_txt_files(base_path)
         if not txt_files:
-            self.error.emit(f"No .txt files in {base_path}!")
+            self.error.emit(f"Нет .txt файлов в {base_path}!")
             return
 
-        self.log.emit(f"[INFO] Found {len(txt_files)} files")
+        self.log.emit(f"[INFO] Найдено файлов: {len(txt_files)}")
         for tf in txt_files:
             self.log.emit(f"  {tf['display_name']}")
 
@@ -246,7 +274,7 @@ class ScanWorker(QThread):
                 proxies = proxies[:remaining]
 
             self.log.emit(f"\n[FILE] {txt_file['display_name']} "
-                          f"({len(proxies)} proxies)")
+                          f"({len(proxies)} прокси)")
 
             for proto, ip, port in proxies:
                 if self._stop:
@@ -275,14 +303,9 @@ class ScanWorker(QThread):
 
 
 # ---------------------------------------------------------------------------
-# Log widget with color highlighting
+# Лог виджет
 # ---------------------------------------------------------------------------
 class LogWidget(QTextEdit):
-    def append_log(self, msg: str):
-        self.append(msg)
-        sb = self.verticalScrollBar()
-        sb.setValue(sb.maximum())
-
     def append_colored(self, msg: str, color: str = "#a6e3a1"):
         self.setTextColor(QColor(color))
         self.append(msg)
@@ -292,173 +315,180 @@ class LogWidget(QTextEdit):
 
 
 # ---------------------------------------------------------------------------
-# Main window
+# Главное окно
 # ---------------------------------------------------------------------------
 class ProxyScannerGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Proxy Scanner")
-        self.setMinimumSize(1000, 700)
-        self.resize(1100, 750)
+        self.setMinimumSize(960, 620)
+        self.resize(1050, 680)
         self.worker = None
 
         central = QWidget()
         self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setSpacing(8)
-        layout.setContentsMargins(12, 12, 12, 12)
+        main_layout = QVBoxLayout(central)
+        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(10, 8, 10, 8)
 
-        # Title
+        # --- Заголовок (компактный) ---
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        dot = QLabel("\u25cf")
+        dot.setStyleSheet("color: #a6e3a1; font-size: 10px;")
+        header.addWidget(dot)
         title = QLabel("PROXY SCANNER")
-        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        title.setStyleSheet("color: #89b4fa; padding: 4px 0;")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
+        title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        title.setStyleSheet("color: #cdd6f4; letter-spacing: 2px;")
+        header.addWidget(title)
+        header.addStretch()
+        ver = QLabel("v2.0")
+        ver.setStyleSheet("color: #585b70; font-size: 10px;")
+        header.addWidget(ver)
+        main_layout.addLayout(header)
 
-        # Settings
-        settings_group = QGroupBox("Settings")
-        settings_layout = QVBoxLayout()
-        settings_group.setLayout(settings_layout)
+        # --- Секция настроек ---
+        settings = QGroupBox("Настройки")
+        s_layout = QVBoxLayout()
+        s_layout.setSpacing(6)
+        settings.setLayout(s_layout)
 
-        # Row 1: Folders
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Input dir:"))
+        # Папки
+        folders = QHBoxLayout()
+        folders.setSpacing(6)
+        folders.addWidget(QLabel("Вход:"))
         self.input_dir = QLineEdit("proxies")
-        self.input_dir.setMinimumWidth(180)
-        row1.addWidget(self.input_dir)
-        btn_in = QPushButton("Browse...")
+        self.input_dir.setMinimumWidth(160)
+        folders.addWidget(self.input_dir)
+        btn_in = QPushButton("...")
         btn_in.setObjectName("btn_browse")
-        btn_in.setFixedWidth(80)
+        btn_in.setFixedWidth(32)
         btn_in.clicked.connect(lambda: self._browse("input"))
-        row1.addWidget(btn_in)
+        folders.addWidget(btn_in)
 
-        row1.addSpacing(20)
+        folders.addSpacing(16)
 
-        row1.addWidget(QLabel("Output dir:"))
+        folders.addWidget(QLabel("Выход:"))
         self.output_dir = QLineEdit(".")
-        self.output_dir.setMinimumWidth(180)
-        row1.addWidget(self.output_dir)
-        btn_out = QPushButton("Browse...")
+        self.output_dir.setMinimumWidth(160)
+        folders.addWidget(self.output_dir)
+        btn_out = QPushButton("...")
         btn_out.setObjectName("btn_browse")
-        btn_out.setFixedWidth(80)
+        btn_out.setFixedWidth(32)
         btn_out.clicked.connect(lambda: self._browse("output"))
-        row1.addWidget(btn_out)
-        row1.addStretch()
-        settings_layout.addLayout(row1)
+        folders.addWidget(btn_out)
+        folders.addStretch()
+        s_layout.addLayout(folders)
 
-        # Row 2: Parameters
-        row2 = QHBoxLayout()
-        for label_text, widget, default in [
-            ("Timeout (s):", QSpinBox(), 5),
-            ("Workers:", QSpinBox(), 30),
-            ("Retries:", QSpinBox(), 1),
-            ("Limit:", QSpinBox(), 0),
-            ("Min speed (ms):", QSpinBox(), 0),
-        ]:
-            row2.addWidget(QLabel(label_text))
-            if label_text == "Timeout (s):":
-                widget.setRange(1, 60)
-            elif label_text == "Workers:":
-                widget.setRange(1, 500)
-            elif label_text == "Retries:":
-                widget.setRange(1, 10)
-            elif "Limit" in label_text:
-                widget.setRange(0, 999999)
-                widget.setSpecialValueText("none")
-            elif "Min speed" in label_text:
-                widget.setRange(0, 60000)
-                widget.setSpecialValueText("none")
-            widget.setValue(default)
-            widget.setFixedWidth(80)
-            row2.addWidget(widget)
-            row2.addSpacing(8)
+        # Параметры (NumInput вместо QSpinBox)
+        params = QHBoxLayout()
+        params.setSpacing(4)
 
-        row2.addStretch()
-        settings_layout.addLayout(row2)
+        param_defs = [
+            ("Таймаут (с)", 5, 1, 60),
+            ("Потоки", 30, 1, 500),
+            ("Ретраи", 1, 1, 10),
+            ("Лимит", 0, 0, 999999),
+            ("Мин. задержка (мс)", 0, 0, 60000),
+        ]
 
-        # Store widgets
-        self.timeout_w = row2.itemAt(1).widget()
-        self.workers_w = row2.itemAt(3).widget()
-        self.retries_w = row2.itemAt(5).widget()
-        self.limit_w = row2.itemAt(7).widget()
-        self.min_speed_w = row2.itemAt(9).widget()
+        self.param_inputs = {}
+        for label_text, default, min_v, max_v in param_defs:
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet("font-size: 10px;")
+            params.addWidget(lbl)
+            inp = NumInput(default, min_v, max_v)
+            params.addWidget(inp)
+            self.param_inputs[label_text] = inp
+            params.addSpacing(8)
 
-        # Row 3: Checkboxes
-        row3 = QHBoxLayout()
-        self.chk_progress = QCheckBox("Progress bar")
-        self.chk_validate = QCheckBox("Validate IP")
-        self.chk_geo = QCheckBox("Geolocation")
-        self.chk_fetch = QCheckBox("Auto-fetch lists")
-        self.chk_no_log_err = QCheckBox("No error log")
-        self.chk_no_log_gen = QCheckBox("No general log")
+        params.addStretch()
+        s_layout.addLayout(params)
+
+        # Чекбоксы
+        checks = QHBoxLayout()
+        checks.setSpacing(12)
+        self.chk_progress = QCheckBox("Прогресс-бар")
+        self.chk_validate = QCheckBox("Валидация IP")
+        self.chk_geo = QCheckBox("Геолокация")
+        self.chk_fetch = QCheckBox("Авто-загрузка")
+        self.chk_no_log_err = QCheckBox("Без лога ошибок")
+        self.chk_no_log_gen = QCheckBox("Без общего лога")
         for chk in (self.chk_progress, self.chk_validate,
                     self.chk_geo, self.chk_fetch,
                     self.chk_no_log_err, self.chk_no_log_gen):
-            row3.addWidget(chk)
-        row3.addStretch()
-        settings_layout.addLayout(row3)
+            checks.addWidget(chk)
+        checks.addStretch()
+        s_layout.addLayout(checks)
 
-        layout.addWidget(settings_group)
+        main_layout.addWidget(settings)
 
-        # Control buttons
-        btn_layout = QHBoxLayout()
-        self.btn_start = QPushButton("  SCAN  ")
+        # --- Кнопки управления ---
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        self.btn_start = QPushButton("\u25b6  СКАНИРОВАТЬ")
         self.btn_start.setObjectName("btn_start")
-        self.btn_start.setFixedHeight(36)
+        self.btn_start.setFixedHeight(32)
         self.btn_start.clicked.connect(self._start_scan)
 
-        self.btn_stop = QPushButton("  STOP  ")
+        self.btn_stop = QPushButton("\u25a0  СТОП")
         self.btn_stop.setObjectName("btn_stop")
-        self.btn_stop.setFixedHeight(36)
+        self.btn_stop.setFixedHeight(32)
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._stop_scan)
 
-        self.btn_open = QPushButton("  OPEN RESULTS  ")
+        self.btn_open = QPushButton("\u2197  ОТКРЫТЬ РЕЗУЛЬТАТЫ")
         self.btn_open.setObjectName("btn_open")
-        self.btn_open.setFixedHeight(36)
+        self.btn_open.setFixedHeight(32)
         self.btn_open.setEnabled(False)
         self.btn_open.clicked.connect(self._open_results)
 
-        btn_layout.addWidget(self.btn_start)
-        btn_layout.addWidget(self.btn_stop)
-        btn_layout.addWidget(self.btn_open)
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
+        btn_row.addWidget(self.btn_start)
+        btn_row.addWidget(self.btn_stop)
+        btn_row.addWidget(self.btn_open)
+        btn_row.addStretch()
+        main_layout.addLayout(btn_row)
 
-        # Progress bar
+        # --- Прогресс-бар ---
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("%p%  |  %v / %m")
-        layout.addWidget(self.progress_bar)
+        self.progress_bar.setFixedHeight(24)
+        main_layout.addWidget(self.progress_bar)
 
-        # Splitter: log + results
+        # --- Сплиттер: лог + таблица ---
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Left: log
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(QLabel("Log"))
+        # Лог
+        log_frame = QWidget()
+        log_layout = QVBoxLayout(log_frame)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+        log_layout.setSpacing(4)
+        log_label = QLabel("Лог")
+        log_label.setStyleSheet("color: #585b70; font-size: 10px; font-weight: 600;")
+        log_layout.addWidget(log_label)
         self.log_text = LogWidget()
-        self.log_text.setFont(QFont("Consolas", 10))
-        left_layout.addWidget(self.log_text)
-        splitter.addWidget(left)
+        log_layout.addWidget(self.log_text)
+        splitter.addWidget(log_frame)
 
-        # Right: results table
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(QLabel("Results"))
+        # Таблица результатов
+        table_frame = QWidget()
+        table_layout = QVBoxLayout(table_frame)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.setSpacing(4)
+        table_label = QLabel("Результаты")
+        table_label.setStyleSheet("color: #585b70; font-size: 10px; font-weight: 600;")
+        table_layout.addWidget(table_label)
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(7)
         self.results_table.setHorizontalHeaderLabels(
-            ["#", "Protocol", "IP", "Port", "Latency", "Speed", "Source"])
+            ["#", "Протокол", "IP", "Порт", "Задержка", "Скорость", "Источник"])
         self.results_table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers)
         self.results_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows)
-        self.results_table.setAlternatingRowColors(False)
         self.results_table.verticalHeader().setVisible(False)
+        self.results_table.setShowGrid(False)
         header = self.results_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -467,17 +497,19 @@ class ProxyScannerGUI(QMainWindow):
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
-        right_layout.addWidget(self.results_table)
-        splitter.addWidget(right)
+        table_layout.addWidget(self.results_table)
+        splitter.addWidget(table_frame)
 
-        splitter.setSizes([400, 600])
-        layout.addWidget(splitter)
+        splitter.setSizes([380, 620])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        main_layout.addWidget(splitter)
 
-        # Status bar
-        self.statusBar().showMessage("Ready")
+        # Статус-бар
+        self.statusBar().showMessage("Готово")
 
     def _browse(self, target: str):
-        d = QFileDialog.getExistingDirectory(self, "Select folder")
+        d = QFileDialog.getExistingDirectory(self, "Выберите папку")
         if d:
             if target == "input":
                 self.input_dir.setText(d)
@@ -491,17 +523,18 @@ class ProxyScannerGUI(QMainWindow):
         self.log_text.clear()
         self.results_table.setRowCount(0)
         self.progress_bar.setValue(0)
-        self.statusBar().showMessage("Scanning...")
+        self.statusBar().showMessage("Сканирование...")
 
+        params = self.param_inputs
         config = {
             "input_dir": self.input_dir.text(),
             "output_dir": self.output_dir.text(),
-            "timeout": self.timeout_w.value(),
-            "workers": self.workers_w.value(),
+            "timeout": params["Таймаут (с)"].value(),
+            "workers": params["Потоки"].value(),
             "test_url": "http://httpbin.org/get",
-            "retry": self.retries_w.value(),
-            "min_speed": self.min_speed_w.value() or None,
-            "limit": self.limit_w.value() or None,
+            "retry": params["Ретраи"].value(),
+            "min_speed": params["Мин. задержка (мс)"].value() or None,
+            "limit": params["Лимит"].value() or None,
             "validate_ip": self.chk_validate.isChecked(),
             "geo": self.chk_geo.isChecked(),
             "fetch": self.chk_fetch.isChecked(),
@@ -520,15 +553,15 @@ class ProxyScannerGUI(QMainWindow):
     def _stop_scan(self):
         if self.worker:
             self.worker.stop()
-            self.log_text.append_colored("\n[STOP] Stopping...", "#f38ba8")
-            self.statusBar().showMessage("Stopping...")
+            self.log_text.append_colored("\n[STOP] Остановка...", "#f38ba8")
+            self.statusBar().showMessage("Остановка...")
 
     def _on_progress(self, done, total, found):
         if total > 0:
             self.progress_bar.setMaximum(total)
             self.progress_bar.setValue(done)
         self.statusBar().showMessage(
-            f"Scanning: {done}/{total}  |  Found: {found}")
+            f"Проверено: {done}/{total}  |  Найдено: {found}")
 
     def _on_log(self, msg: str):
         if msg.startswith("[OK]"):
@@ -540,13 +573,13 @@ class ProxyScannerGUI(QMainWindow):
         elif msg.startswith("[INFO]"):
             self.log_text.append_colored(msg, "#f9e2af")
         else:
-            self.log_text.append_colored(msg, "#6c7086")
+            self.log_text.append_colored(msg, "#585b70")
 
     def _on_results(self, results: list):
         if not results:
             self.log_text.append_colored(
-                "\n[RESULT] No working proxies found!", "#f38ba8")
-            self.statusBar().showMessage("Done - no working proxies")
+                "\n[RESULT] Рабочих прокси не найдено!", "#f38ba8")
+            self.statusBar().showMessage("Готово - нет прокси")
             return
 
         results.sort(key=lambda x: x["total_ms"])
@@ -566,36 +599,37 @@ class ProxyScannerGUI(QMainWindow):
             for col, text in enumerate(items):
                 item = QTableWidgetItem(text)
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                # Color by speed
+                # Цвет строки по скорости
                 if p["total_ms"] < 500:
-                    item.setBackground(QColor(24, 80, 24))
+                    bg = QColor(24, 68, 24)
                 elif p["total_ms"] < 1500:
-                    item.setBackground(QColor(80, 75, 24))
+                    bg = QColor(68, 64, 24)
                 else:
-                    item.setBackground(QColor(80, 24, 24))
+                    bg = QColor(68, 24, 24)
+                item.setBackground(bg)
                 self.results_table.setItem(i, col, item)
 
         self.log_text.append_colored(
-            f"\n[RESULT] Found {len(results)} working proxies", "#89b4fa")
+            f"\n[RESULT] Найдено {len(results)} работающих прокси", "#89b4fa")
 
-        # Save
-        self.log_text.append_colored("[INFO] Saving results...", "#f9e2af")
+        # Сохранение
+        self.log_text.append_colored("[INFO] Сохранение результатов...", "#f9e2af")
         try:
             from main import save_all_formats
             save_all_formats(results, self.output_dir.text(),
                              self.chk_geo.isChecked())
-            self.log_text.append_colored("[INFO] Results saved", "#a6e3a1")
+            self.log_text.append_colored("[INFO] Результаты сохранены", "#a6e3a1")
         except Exception as e:
             self.log_text.append_colored(
-                f"[ERROR] Save failed: {e}", "#f38ba8")
+                f"[ERROR] Ошибка сохранения: {e}", "#f38ba8")
 
         self.btn_open.setEnabled(True)
-        self.statusBar().showMessage(f"Done - {len(results)} proxies found")
+        self.statusBar().showMessage(f"Готово - найдено {len(results)} прокси")
 
     def _on_error(self, msg: str):
-        QMessageBox.warning(self, "Error", msg)
+        QMessageBox.warning(self, "Ошибка", msg)
         self.log_text.append_colored(f"\n[ERROR] {msg}", "#f38ba8")
-        self.statusBar().showMessage("Error")
+        self.statusBar().showMessage("Ошибка")
 
     def _on_finished(self):
         self.btn_start.setEnabled(True)
@@ -614,12 +648,12 @@ class ProxyScannerGUI(QMainWindow):
                     import subprocess
                     subprocess.Popen(["xdg-open", out])
             except Exception as e:
-                QMessageBox.warning(self, "Error",
-                                    f"Could not open: {e}")
+                QMessageBox.warning(self, "Ошибка",
+                                    f"Не удалось открыть: {e}")
 
 
 # ---------------------------------------------------------------------------
-# Launch
+# Запуск
 # ---------------------------------------------------------------------------
 def run_gui():
     app = QApplication(sys.argv)
