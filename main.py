@@ -20,7 +20,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ---------------------------------------------------------------------------
-# Глобальный флаг для экстренного завершения (Ctrl+C)
+# Флаг для корректного завершения (Ctrl+C)
 # ---------------------------------------------------------------------------
 _shutdown_requested = False
 
@@ -39,30 +39,55 @@ signal.signal(signal.SIGTERM, _signal_handler)
 
 
 # ---------------------------------------------------------------------------
-# Логирование ошибок
+# Логирование: error.log + general.log
 # ---------------------------------------------------------------------------
-ERROR_LOG_DIR = "logs"
-ERROR_LOG_FILE = os.path.join(ERROR_LOG_DIR, "error.log")
+LOG_DIR = "logs"
+ERROR_LOG_FILE = os.path.join(LOG_DIR, "error.log")
+GENERAL_LOG_FILE = os.path.join(LOG_DIR, "general.log")
 ERROR_THRESHOLD = 10
 
 error_logger = logging.getLogger("proxy_errors")
 error_logger.setLevel(logging.DEBUG)
 
+general_logger = logging.getLogger("proxy_general")
+general_logger.setLevel(logging.DEBUG)
 
-def _setup_error_log():
-    os.makedirs(ERROR_LOG_DIR, exist_ok=True)
-    fh = logging.FileHandler(ERROR_LOG_FILE, encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter(
+
+def _setup_logs():
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+    # error.log - только ошибки
+    fh_err = logging.FileHandler(ERROR_LOG_FILE, encoding="utf-8")
+    fh_err.setLevel(logging.WARNING)
+    fh_err.setFormatter(logging.Formatter(
         "%(asctime)s | %(levelname)-7s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     ))
-    error_logger.addHandler(fh)
+    error_logger.addHandler(fh_err)
+
+    # general.log - всё подряд
+    fh_gen = logging.FileHandler(GENERAL_LOG_FILE, encoding="utf-8")
+    fh_gen.setLevel(logging.DEBUG)
+    fh_gen.setFormatter(logging.Formatter(
+        "%(asctime)s | %(levelname)-7s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    general_logger.addHandler(fh_gen)
 
 
 def log_error(proxy_addr: str, exception: Exception):
-    error_logger.error("%s — %s: %s", proxy_addr,
+    error_logger.error("%s -- %s: %s", proxy_addr,
                        type(exception).__name__, exception)
+    general_logger.error("%s -- %s: %s", proxy_addr,
+                         type(exception).__name__, exception)
+
+
+def log_info(msg: str):
+    general_logger.info(msg)
+
+
+def log_debug(msg: str):
+    general_logger.debug(msg)
 
 
 def offer_open_log(error_count: int):
@@ -74,7 +99,7 @@ def offer_open_log(error_count: int):
         choice = input("  Открыть лог сейчас? [Y/n]: ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         return
-    if choice in ("", "y", "д"):
+    if choice in ("", "y"):
         _open_file(ERROR_LOG_FILE)
 
 
@@ -117,13 +142,13 @@ PUBLIC_PROXY_URLS = [
 
 
 def fetch_proxy_lists(output_dir: str, urls: list = None):
-    """Скачивает публичные прокси-листы и сохраняет в output_dir."""
     urls = urls or PUBLIC_PROXY_URLS
     os.makedirs(output_dir, exist_ok=True)
     downloaded = []
     for url in urls:
         filename = url.rsplit("/", 1)[-1]
         filepath = os.path.join(output_dir, filename)
+        log_info(f"Скачивание {url}")
         print(f"  Скачивание {url} ...")
         try:
             resp = requests.get(url, timeout=30)
@@ -131,11 +156,12 @@ def fetch_proxy_lists(output_dir: str, urls: list = None):
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(resp.text)
             count = len(resp.text.strip().splitlines())
+            log_info(f"Сохранён {filename} ({count} строк)")
             print(f"    Сохранён {filename} ({count} строк)")
             downloaded.append(filepath)
         except Exception as e:
-            print(f"    Ошибка скачивания {filename}: {e}")
             log_error(url, e)
+            print(f"    Ошибка скачивания {filename}: {e}")
     return downloaded
 
 
@@ -146,7 +172,6 @@ _geo_cache: dict = {}
 
 
 def lookup_country(ip: str) -> str:
-    """Определяет страну по IP через бесплатный API."""
     if ip in _geo_cache:
         return _geo_cache[ip]
     try:
@@ -375,11 +400,10 @@ class ProgressTracker:
 
 
 # ---------------------------------------------------------------------------
-# Сканирование одного прокси с ретраями
+# Проверка прокси с ретраями
 # ---------------------------------------------------------------------------
 def check_proxy_with_retry(protocol: str, ip: str, port: int, timeout: int,
                            test_url: str, retries: int):
-    """Проверяет прокси, при неудаче повторяет до retries раз."""
     for attempt in range(1, retries + 1):
         result = check_proxy_with_speed(protocol, ip, port, timeout, test_url)
         if result:
@@ -400,6 +424,7 @@ def scan_file(file_info: dict, timeout: int, max_workers: int,
     display_name = file_info["display_name"]
     filename = file_info["filename"]
 
+    log_info(f"Сканирование файла: {display_name}")
     print(f"\n  Файл: {display_name}")
 
     proxies_to_check = read_proxies_from_file(file_path, validate_ip)
@@ -407,6 +432,7 @@ def scan_file(file_info: dict, timeout: int, max_workers: int,
         print(f"    Нет данных для проверки в {filename}")
         return []
 
+    log_info(f"Найдено {len(proxies_to_check)} прокси в {filename}")
     working = []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -427,13 +453,13 @@ def scan_file(file_info: dict, timeout: int, max_workers: int,
             result = future.result()
 
             if result:
-                # Фильтр по минимальной скорости (макс. задержка)
                 if min_speed and result["total_ms"] > min_speed:
                     if progress:
                         progress.update(False)
                     continue
                 result["source_file"] = display_name
                 working.append(result)
+                log_info(f"[OK] {result['proxy']} - {result['total_ms']}ms")
                 if progress:
                     progress.update(True)
                 else:
@@ -443,11 +469,13 @@ def scan_file(file_info: dict, timeout: int, max_workers: int,
                     print(f"    [OK]  {result['proxy']} - {speed_info}")
             else:
                 error_count[0] += 1
+                log_debug(f"[FAIL] {proto}://{ip}:{port}")
                 if progress:
                     progress.update(False)
                 else:
                     print(f"    [--]  {proto}://{ip}:{port}")
 
+    log_info(f"Файл {filename}: {len(working)}/{len(proxies_to_check)} работает")
     print(f"    Итого: {len(working)}/{len(proxies_to_check)}")
     return working
 
@@ -459,27 +487,26 @@ def save_all_formats(working_proxies: list, output_dir: str,
                      add_geo: bool = False):
     if not working_proxies:
         print("Нет работающих прокси для сохранения")
+        log_info("Нет работающих прокси для сохранения")
         return
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # Геолокация если включена
     if add_geo:
         print("  Определение стран...")
+        log_info("Определение стран прокси")
         for p in working_proxies:
             p["country"] = lookup_country(p["ip"])
-            time.sleep(0.15)  # лимит free API
+            time.sleep(0.15)
 
     sorted_by_speed = sorted(working_proxies, key=lambda x: x["total_ms"])
-
-    geo_note = " + страна" if add_geo else ""
 
     # 1. Все работающие прокси
     with open(os.path.join(output_dir, "1_all_working_proxies.txt"), "w",
               encoding="utf-8") as f:
         f.write("=" * 80 + "\n")
         f.write("ВСЕ РАБОТАЮЩИЕ ПРОКСИ (от быстрых к медленным)\n")
-        f.write(f"Всего найдено: {len(sorted_by_speed)} прокси\n")
+        f.write(f"Всего: {len(sorted_by_speed)}\n")
         f.write(f"Дата: {datetime.now():%Y-%m-%d %H:%M:%S}\n")
         f.write("=" * 80 + "\n\n")
         for idx, p in enumerate(sorted_by_speed, 1):
@@ -494,7 +521,7 @@ def save_all_formats(working_proxies: list, output_dir: str,
     with open(os.path.join(output_dir, "2_proxies_for_reuse.txt"), "w",
               encoding="utf-8") as f:
         f.write("# Работающие прокси protocol://ip:port\n")
-        f.write(f"# Всего: {len(sorted_by_speed)} прокси\n")
+        f.write(f"# Всего: {len(sorted_by_speed)}\n")
         f.write(f"# Создан: {datetime.now():%Y-%m-%d %H:%M:%S}\n\n")
         for p in sorted_by_speed:
             f.write(f"{p['proxy']}\n")
@@ -503,7 +530,7 @@ def save_all_formats(working_proxies: list, output_dir: str,
     with open(os.path.join(output_dir, "3_ips_only.txt"), "w",
               encoding="utf-8") as f:
         f.write("# IP:PORT без протокола (уникальные)\n")
-        f.write(f"# Всего: {len(sorted_by_speed)} адресов\n\n")
+        f.write(f"# Всего: {len(sorted_by_speed)}\n\n")
         seen = set()
         for p in sorted_by_speed:
             addr = f"{p['ip']}:{p['port']}"
@@ -528,12 +555,12 @@ def save_all_formats(working_proxies: list, output_dir: str,
                     geo = f" [{p.get('country', '')}]" if add_geo else ""
                     f.write(f"{p['proxy']:<45}  # {speed_info}{geo}\n")
             print(f"    {os.path.basename(fname)} ({len(filtered)})")
+            log_info(f"Сохранён {os.path.basename(fname)} ({len(filtered)})")
 
     # 5. CSV
     with open(os.path.join(output_dir, "5_proxies_analysis.csv"), "w",
               encoding="utf-8") as f:
-        header = "protocol,ip,port,response_ms,speed_kbps,country,source_file\n"
-        f.write(header)
+        f.write("protocol,ip,port,response_ms,speed_kbps,country,source_file\n")
         for p in sorted_by_speed:
             geo = p.get("country", "")
             f.write(f"{p['protocol']},{p['ip']},{p['port']},{p['total_ms']},"
@@ -560,8 +587,7 @@ def save_all_formats(working_proxies: list, output_dir: str,
         if count:
             avg = sum(p["total_ms"] for p in sorted_by_speed
                       if p["protocol"] == protocol) / count
-            print(f"    {protocol.upper()}: {count}, "
-                  f"средняя: {avg:.1f}ms")
+            print(f"    {protocol.upper()}: {count}, средняя: {avg:.1f}ms")
 
     fast = [p for p in sorted_by_speed if p["total_ms"] < 500]
     medium = [p for p in sorted_by_speed if 500 <= p["total_ms"] < 1500]
@@ -581,6 +607,8 @@ def save_all_formats(working_proxies: list, output_dir: str,
         for c, n in sorted(countries.items(), key=lambda x: -x[1])[:10]:
             print(f"    {c}: {n}")
 
+    log_info(f"Сохранено: {len(sorted_by_speed)} прокси")
+
     return {
         "total": len(sorted_by_speed),
         "fast": len(fast),
@@ -592,25 +620,29 @@ def save_all_formats(working_proxies: list, output_dir: str,
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# CLI парсер с полной документацией
 # ---------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Сканер прокси с проверкой работоспособности и скорости.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
-Примеры:
-  python main.py                               # CLI: базовый запуск
-  python main.py --gui                         # GUI: графический интерфейс
+примеры:
+  python main.py                               # базовый запуск
+  python main.py --gui                         # GUI режим
   python main.py -d my_proxies/ -t 3 -w 50    # свои настройки
   python main.py --fetch                       # скачать прокси-листы
   python main.py --watch 300                   # проверка каждые 5 минут
   python main.py --geo --min-speed 1000        # только быстрые + страны
+
+логи:
+  logs/error.log     - только ошибки (таймауты, обрывы)
+  logs/general.log   - вся активность (сканы, результаты, инфо)
 """,
     )
 
     # Основные
-    g = parser.add_argument_group("Основные")
+    g = parser.add_argument_group("Основные настройки")
     g.add_argument("-d", "--input-dir", default="proxies",
                    help="Папка со списками прокси (по умолчанию: proxies/)")
     g.add_argument("-o", "--output-dir", default=".",
@@ -620,37 +652,41 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("-w", "--workers", type=int, default=30,
                    help="Количество потоков (по умолчанию: 30)")
     g.add_argument("--test-url", default="http://httpbin.org/get",
-                   help="URL для проверки скорости")
+                   help="URL для проверки скорости (по умолчанию: http://httpbin.org/get)")
 
     # Опциональные фичи
     g2 = parser.add_argument_group("Опциональные фичи")
     g2.add_argument("--progress", action="store_true",
-                    help="Показывать прогресс-бар вместо каждого прокси")
+                    help="Прогресс-бар вместо вывода каждого прокси")
     g2.add_argument("--retry", type=int, default=1, metavar="N",
                     help="Повторять проверку N раз при неудаче (по умолчанию: 1)")
     g2.add_argument("--min-speed", type=float, default=None, metavar="MS",
-                    help="Максимальная задержка в мс (отбросить медленнее)")
+                    help="Максимальная задержка в мс, отбросить медленнее (по умолчанию: нет)")
     g2.add_argument("--limit", type=int, default=None, metavar="N",
-                    help="Ограничить количество проверяемых прокси")
+                    help="Макс. количество проверяемых прокси (по умолчанию: безлимит)")
     g2.add_argument("--parallel-files", type=int, default=1, metavar="N",
                     help="Сканировать N файлов параллельно (по умолчанию: 1)")
     g2.add_argument("--validate-ip", action="store_true",
                     help="Проверять формат IP перед подключением")
     g2.add_argument("--geo", action="store_true",
-                    help="Определять страну прокси (бесплатный API)")
+                    help="Определять страну прокси (бесплатный API ip-api.com)")
     g2.add_argument("--fetch", action="store_true",
                     help="Скачать публичные прокси-листы перед сканированием")
     g2.add_argument("--fetch-urls", nargs="+", metavar="URL",
                    help="Доп. URLs для скачивания прокси-листов")
     g2.add_argument("--watch", type=int, default=None, metavar="SEC",
-                    help="Повторять сканирование каждые N секунд")
+                    help="Повторять сканирование каждые N секунд (Ctrl+C для выхода)")
 
     # Логирование
     g3 = parser.add_argument_group("Логирование")
     g3.add_argument("--no-log-errors", action="store_true",
-                    help="Отключить логирование ошибок в файл")
+                    help="Отключить логирование ошибок в logs/error.log")
+    g3.add_argument("--no-log-general", action="store_true",
+                    help="Отключить логирование в logs/general.log")
+    g3.add_argument("--no-confirm", action="store_true",
+                    help="Пропустить подтверждение запуска в CLI режиме")
 
-    # Режим интерфейса
+    # Режим
     g4 = parser.add_argument_group("Режим")
     g4.add_argument("--gui", action="store_true",
                     help="Запустить графический интерфейс (PyQt6)")
@@ -664,21 +700,24 @@ def build_parser() -> argparse.ArgumentParser:
 def run_scan(args):
     base_path = args.input_dir
 
-    # Скачивание если нужно
     if args.fetch:
         print("\n  СКАЧИВАНИЕ ПРОКСИ-ЛИСТОВ:")
+        log_info("Скачивание прокси-листов")
         fetch_proxy_lists(base_path, args.fetch_urls)
         print()
 
     if not os.path.exists(base_path):
         print(f"Папка {base_path} не найдена!")
+        log_error(base_path, FileNotFoundError(f"Папка не найдена: {base_path}"))
         return None
 
     print(f"  Поиск .txt файлов в {base_path} ...")
+    log_info(f"Поиск .txt файлов в {base_path}")
     txt_files = find_all_txt_files(base_path)
 
     if not txt_files:
         print(f"  Не найдено .txt файлов в {base_path}!")
+        log_info(f"Не найдено .txt файлов в {base_path}")
         return None
 
     print(f"  Найдено {len(txt_files)} файлов:")
@@ -689,7 +728,6 @@ def run_scan(args):
     all_working = []
     error_count = [0]
 
-    # Подсчёт общего количества прокси для прогресс-бара
     total_proxies = 0
     if args.progress:
         for tf in txt_files:
@@ -724,9 +762,9 @@ def run_scan(args):
 
     if progress:
         elapsed = progress.finish()
+        log_info(f"Сканирование завершено за {elapsed:.1f}с")
         print(f"  Сканирование заняло {elapsed:.1f}с")
 
-    # Лимит
     if args.limit and len(all_working) > args.limit:
         all_working = sorted(all_working, key=lambda x: x["total_ms"])
         all_working = all_working[:args.limit]
@@ -755,19 +793,55 @@ def main():
             sys.exit(1)
         return
 
-    if not args.no_log_errors:
-        _setup_error_log()
+    # Настройка логирования
+    if not args.no_log_errors or not args.no_log_general:
+        _setup_logs()
 
     print("=" * 60)
     print("  PROXY SCANNER")
     print(f"  {datetime.now():%Y-%m-%d %H:%M:%S}")
     print("=" * 60)
+    log_info("Прокси сканер запущен")
+
+    # Подтверждение запуска
+    if not args.no_confirm and sys.stdin.isatty():
+        print()
+        print(f"  Папка ввода:   {args.input_dir}")
+        print(f"  Папка вывода:  {args.output_dir}")
+        print(f"  Таймаут:       {args.timeout}с")
+        print(f"  Потоки:        {args.workers}")
+        print(f"  Ретраи:        {args.retry}x")
+        if args.min_speed:
+            print(f"  Мин.скорость:  {args.min_speed}мс")
+        if args.limit:
+            print(f"  Лимит:         {args.limit}")
+        if args.watch:
+            print(f"  Мониторинг:    каждые {args.watch}с")
+        if args.geo:
+            print(f"  Геолокация:    включена")
+        if args.fetch:
+            print(f"  Авто-загрузка: включена")
+        print()
+        try:
+            confirm = input("  Начать сканирование? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Отмена.")
+            return
+        if confirm not in ("", "y"):
+            print("  Отмена.")
+            return
+
+    log_info(f"Настройки: input={args.input_dir} output={args.output_dir} "
+             f"timeout={args.timeout} workers={args.workers} "
+             f"retry={args.retry} min_speed={args.min_speed} "
+             f"limit={args.limit} geo={args.geo} watch={args.watch}")
 
     while True:
         all_working = run_scan(args)
 
         if all_working:
             print(f"\n  ВСЕГО РАБОТАЮЩИХ ПРОКСИ: {len(all_working)}")
+            log_info(f"Всего работающих прокси: {len(all_working)}")
 
             sorted_proxies = sorted(all_working, key=lambda x: x["total_ms"])
 
@@ -798,11 +872,13 @@ def main():
                         print(f"    {protocol.upper()}: {count}")
         else:
             print("\n  Нет работающих прокси!")
+            log_info("Нет работающих прокси")
 
         # Watch mode
         if args.watch and not _shutdown_requested:
             print(f"\n  Следующая проверка через {args.watch}с "
                   f"(Ctrl+C для выхода)...")
+            log_info(f"Ожидание {args.watch}с до следующей проверки")
             try:
                 for _ in range(args.watch):
                     if _shutdown_requested:
@@ -817,6 +893,8 @@ def main():
             print(f"{'=' * 60}")
         else:
             break
+
+    log_info("Прокси сканер остановлен")
 
 
 if __name__ == "__main__":
